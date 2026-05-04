@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASCII Konverter</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>ASCII.ART</h1>
+  <p class="subtitle">Bild &rarr; ASCII Konverter</p>
+</header>
+
+<div class="app">
+  <div class="panel">
+    <div class="panel-title">// Eingabe</div>
+
+    <div class="upload-zone" id="uploadZone">
+      <span class="icon">⬡</span>
+      <p>Bild hierher ziehen</p>
+      <p>oder klicken zum Auswählen</p>
+      <p class="hint">JPG · PNG · GIF · WEBP · BMP</p>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+
+    <div class="preview-wrap" id="previewWrap">
+      <img id="previewImg" src="" alt="Vorschau">
+    </div>
+
+    <div class="panel-title" style="margin-top:10px">// Einstellungen</div>
+
+    <div class="control-group">
+      <label>Breite (Zeichen) <span id="widthVal">100</span></label>
+      <input type="range" id="widthSlider" min="20" max="300" value="100">
+    </div>
+
+    <div class="control-group">
+      <label>Kontrast <span id="contrastVal">1.0</span></label>
+      <input type="range" id="contrastSlider" min="0.5" max="3" step="0.1" value="1">
+    </div>
+
+    <div class="control-group">
+      <label>Helligkeit <span id="brightnessVal">1.0</span></label>
+      <input type="range" id="brightnessSlider" min="0.3" max="2" step="0.1" value="1">
+    </div>
+
+    <div class="control-group">
+      <label>Zeichensatz</label>
+      <select id="charsetSelect">
+        <option value="detailed">Detailliert  ( @#S%?*+;:,. )</option>
+        <option value="simple">Einfach  ( @#+-. )</option>
+        <option value="blocks">Blöcke  ( █▓▒░ )</option>
+        <option value="binary">Binär  ( 01 )</option>
+        <option value="letters">Buchstaben  ( ABCDE... )</option>
+        <option value="braille">Braille  ( ⠿⠻⠯⠮... )</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Modus</label>
+      <div class="toggle-group">
+        <button class="toggle-btn active" data-mode="dark">Dark</button>
+        <button class="toggle-btn" data-mode="light">Light</button>
+        <button class="toggle-btn" data-mode="color">Farbe</button>
+      </div>
+    </div>
+
+    <button class="btn-convert" id="convertBtn" disabled>
+      Konvertieren
+    </button>
+  </div>
+
+  <!-- Rechte Seite: Ausgabe -->
+  <div class="panel output-panel">
+    <div class="output-header">
+      <div class="panel-title" style="margin-bottom:0">// Output</div>
+      <div class="output-actions">
+        <button class="btn-small" id="copyBtn">Kopieren</button>
+        <button class="btn-small" id="downloadBtn">Download</button>
+      </div>
+    </div>
+
+    <div class="ascii-output" id="asciiOutput">
+      <div class="empty-state" id="emptyState">
+        <span class="big">▒</span>
+        <span>Bild laden & konvertieren</span>
+      </div>
+      <pre id="asciiText"></pre>
+    </div>
+    <canvas id="workCanvas"></canvas>
+
+    <div class="status-bar">
+      <span id="statusLeft">Bereit</span>
+      <span id="statusRight"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const CHARSETS = {
+  detailed: ' .,:;*?%S#@'.split('').reverse(),
+  simple:   ' .-+#@'.split('').reverse(),
+  blocks:   ' ░▒▓█'.split('').reverse(),
+  binary:   ' 01'.split('').reverse(),
+  letters:  ' .:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ#@'.split('').reverse(),
+  braille:  ' ⠁⠃⠇⠯⠷⠻⠿'.split('').reverse(),
+};
+
+let currentImage = null;
+let currentMode = 'dark';
+
+// DOM refs
+const uploadZone   = document.getElementById('uploadZone');
+const fileInput    = document.getElementById('fileInput');
+const previewWrap  = document.getElementById('previewWrap');
+const previewImg   = document.getElementById('previewImg');
+const convertBtn   = document.getElementById('convertBtn');
+const asciiText    = document.getElementById('asciiText');
+const emptyState   = document.getElementById('emptyState');
+const workCanvas   = document.getElementById('workCanvas');
+const widthSlider  = document.getElementById('widthSlider');
+const widthVal     = document.getElementById('widthVal');
+const contrastSlider = document.getElementById('contrastSlider');
+const contrastVal  = document.getElementById('contrastVal');
+const brightnessSlider = document.getElementById('brightnessSlider');
+const brightnessVal = document.getElementById('brightnessVal');
+const charsetSelect = document.getElementById('charsetSelect');
+const statusLeft   = document.getElementById('statusLeft');
+const statusRight  = document.getElementById('statusRight');
+const copyBtn      = document.getElementById('copyBtn');
+const downloadBtn  = document.getElementById('downloadBtn');
+
+// Slider labels
+widthSlider.addEventListener('input', () => widthVal.textContent = widthSlider.value);
+contrastSlider.addEventListener('input', () => contrastVal.textContent = parseFloat(contrastSlider.value).toFixed(1));
+brightnessSlider.addEventListener('input', () => brightnessVal.textContent = parseFloat(brightnessSlider.value).toFixed(1));
+
+// Mode toggle
+document.querySelectorAll('.toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.dataset.mode;
+  });
+});
+
+// Upload
+uploadZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) loadFile(file);
+});
+
+function loadFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      currentImage = img;
+      previewImg.src = ev.target.result;
+      previewWrap.style.display = 'block';
+      convertBtn.disabled = false;
+      statusLeft.textContent = `${file.name} (${img.width}×${img.height}px)`;
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// Conversion
+convertBtn.addEventListener('click', convert);
+
+function convert() {
+  if (!currentImage) return;
+
+  convertBtn.textContent = 'Verarbeite...';
+  convertBtn.classList.add('processing');
+  convertBtn.disabled = true;
+
+  setTimeout(() => {
+    try {
+      const result = imageToASCII();
+      displayResult(result);
+    } catch(e) {
+      statusLeft.textContent = 'Fehler: ' + e.message;
+    }
+    convertBtn.textContent = 'Konvertieren';
+    convertBtn.classList.remove('processing');
+    convertBtn.disabled = false;
+  }, 30);
+}
+
+function imageToASCII() {
+  const cols = parseInt(widthSlider.value);
+  const contrast = parseFloat(contrastSlider.value);
+  const brightness = parseFloat(brightnessSlider.value);
+  const charset = CHARSETS[charsetSelect.value];
+
+  // Aspect ratio correction (chars are ~2x tall as wide)
+  const aspectRatio = currentImage.height / currentImage.width;
+  const rows = Math.round(cols * aspectRatio * 0.45);
+
+  const ctx = workCanvas.getContext('2d');
+  workCanvas.width = cols;
+  workCanvas.height = rows;
+
+  // Draw image scaled
+  ctx.drawImage(currentImage, 0, 0, cols, rows);
+
+  const pixels = ctx.getImageData(0, 0, cols, rows).data;
+  let lines = [];
+  let colorLines = [];
+
+  for (let y = 0; y < rows; y++) {
+    let line = '';
+    let colorLine = [];
+    for (let x = 0; x < cols; x++) {
+      const i = (y * cols + x) * 4;
+      let r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+
+      // Brightness & contrast
+      r = clamp(((r / 255 - 0.5) * contrast + 0.5) * brightness * 255, 0, 255);
+      g = clamp(((g / 255 - 0.5) * contrast + 0.5) * brightness * 255, 0, 255);
+      b = clamp(((b / 255 - 0.5) * contrast + 0.5) * brightness * 255, 0, 255);
+
+      // Luminance
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      const idx = Math.floor((lum / 255) * (charset.length - 1));
+      const char = charset[idx] || ' ';
+
+      line += char;
+      colorLine.push({ char, r: Math.round(r), g: Math.round(g), b: Math.round(b) });
+    }
+    lines.push(line);
+    colorLines.push(colorLine);
+  }
+
+  return { lines, colorLines, cols, rows };
+}
+
+function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+
+function displayResult({ lines, colorLines, cols, rows }) {
+  emptyState.style.display = 'none';
+
+  if (currentMode === 'color') {
+    // Color mode: use spans with inline color
+    let html = '';
+    for (const line of colorLines) {
+      for (const { char, r, g, b } of line) {
+        const esc = char === '<' ? '&lt;' : char === '>' ? '&gt;' : char === '&' ? '&amp;' : char;
+        html += `<span style="color:rgb(${r},${g},${b})">${esc}</span>`;
+      }
+      html += '\n';
+    }
+    asciiText.innerHTML = html;
+    asciiText.style.color = '';
+  } else {
+    asciiText.textContent = lines.join('\n');
+    if (currentMode === 'light') {
+      asciiText.style.color = '#000';
+      asciiText.closest('.ascii-output').style.background = '#fff';
+    } else {
+      asciiText.style.color = 'var(--accent)';
+      asciiText.closest('.ascii-output').style.background = '#000';
+    }
+  }
+
+  statusRight.textContent = `${cols} × ${rows} Zeichen · ${lines.join('\n').length.toLocaleString()} total`;
+  statusLeft.innerHTML = '<span class="ok">✓ Konvertiert</span>';
+}
+
+// Copy
+copyBtn.addEventListener('click', () => {
+  const text = asciiText.textContent;
+  if (!text.trim()) return;
+  navigator.clipboard.writeText(text).then(() => {
+    copyBtn.textContent = 'Kopiert!';
+    setTimeout(() => copyBtn.textContent = 'Kopieren', 1500);
+  });
+});
+
+// Download
+downloadBtn.addEventListener('click', () => {
+  const text = asciiText.textContent;
+  if (!text.trim()) return;
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'ascii-art.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
